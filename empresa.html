@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Impulsabg — Empresa</title>
+  <style>
+    body{ font-family:Arial, sans-serif; background:#f5f7fb; padding:18px; color:#0b1220; }
+    .wrap{ max-width:900px; margin:auto; }
+    .card{ background:#fff; padding:14px; border-radius:10px; box-shadow:0 6px 18px rgba(11,78,135,0.06); margin-bottom:12px;}
+    label{ display:block; margin-top:8px; font-weight:600; }
+    input,textarea,select{ width:100%; padding:8px; margin-top:6px; border-radius:6px; border:1px solid #e6eefc; }
+    .btn{ background:#0b5ed7; color:white; padding:10px 12px; border-radius:8px; border:0; cursor:pointer; }
+    .muted{ color:#667085; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Publicar empresa / vacante</h1>
+      <p class="muted">Publica tus vacantes para que los jóvenes apliquen.</p>
+      <form id="companyForm">
+        <label>Nombre de la empresa</label><input id="comp-name" required />
+        <label>¿A qué se dedica?</label><input id="comp-activity" />
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1"><label>Tamaño</label><select id="comp-size"><option></option><option>1-5</option><option>6-20</option><option>21-50</option><option>51-200</option><option>200+</option></select></div>
+          <div style="flex:1"><label>Ciudad</label><input id="comp-city" /></div>
+        </div>
+        <label>Cualidades que busca</label><textarea id="comp-qualities"></textarea>
+        <label>Vacante (título)</label><input id="comp-job" placeholder="Ej: Auxiliar de tienda" />
+        <label>Descripción de la vacante</label><textarea id="comp-job-desc"></textarea>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn" id="comp-submit" type="button">Publicar empresa / vacante</button>
+          <button class="btn" id="comp-clear" type="button" style="background:transparent;color:#0b5ed7;border:1px solid rgba(11,78,135,0.12)">Limpiar</button>
+        </div>
+        <div id="comp-status" class="muted"></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Empresas publicadas</h2>
+      <div id="companiesList" class="muted">Cargando...</div>
+    </div>
+  </div>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDhv4JeQ8Rr_VR2lyDY3APdHuAB2ImE7rg",
+      authDomain: "impulsabga.firebaseapp.com",
+      projectId: "impulsabga",
+      storageBucket: "impulsabga.firebasestorage.app",
+      messagingSenderId: "761772480480",
+      appId: "1:761772480480:web:2a2a5f49ecae2395057d85"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    document.getElementById('comp-submit').addEventListener('click', async ()=>{
+      const name = document.getElementById('comp-name').value.trim();
+      if(!name){ document.getElementById('comp-status').textContent='Nombre obligatorio'; return; }
+      const doc = {
+        name,
+        activity: document.getElementById('comp-activity').value.trim(),
+        size: document.getElementById('comp-size').value,
+        city: document.getElementById('comp-city').value.trim(),
+        qualities: document.getElementById('comp-qualities').value.trim(),
+        jobTitle: document.getElementById('comp-job').value.trim(),
+        jobDesc: document.getElementById('comp-job-desc').value.trim(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      await db.collection('companies').add(doc);
+      document.getElementById('companyForm').reset();
+      document.getElementById('comp-status').textContent='Publicado';
+      setTimeout(()=>document.getElementById('comp-status').textContent='',3000);
+    });
+
+    // list companies
+    const companiesList = document.getElementById('companiesList');
+    db.collection('companies').orderBy('createdAt','desc').onSnapshot(snap=>{
+      if(snap.empty){ companiesList.innerHTML = '<div class="muted">Sin empresas</div>'; return; }
+      let html = '';
+      snap.forEach(d=>{
+        const c = d.data();
+        html += `<div style="padding:10px;border-bottom:1px solid #f3f6fb;">
+          <div style="font-weight:700">${escapeHtml(c.name||'')}</div>
+          <div class="muted">${escapeHtml(c.jobTitle||'')}</div>
+          <div class="small" style="margin-top:6px">${escapeHtml(c.activity||'')} • ${escapeHtml(c.city||'')}</div>
+        </div>`;
+      });
+      companiesList.innerHTML = html;
+    });
+
+    function escapeHtml(str){ return String(str||'').replace(/[&<>"'`=\/]/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'}[s])); }
+    document.getElementById('comp-clear').addEventListener('click', ()=>document.getElementById('companyForm').reset());
+  </script>
+</body>
+</html>

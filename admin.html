@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin — Impulsabg</title>
+  <style>
+    body{ font-family:Arial, sans-serif; background:#f5f7fb; padding:18px; color:#0b1220; }
+    .wrap{ max-width:1100px; margin:auto; }
+    .card{ background:#fff; padding:14px; border-radius:10px; box-shadow:0 6px 18px rgba(11,78,135,0.06); margin-bottom:12px;}
+    .btn{ background:#0b5ed7; color:white; padding:8px 10px; border-radius:6px; border:0; cursor:pointer; margin-right:8px;}
+    table{ width:100%; border-collapse:collapse; margin-top:12px;}
+    th,td{ padding:8px; border-bottom:1px solid #eee; text-align:left; vertical-align:top; }
+    .muted{ color:#667085; }
+    .small{ font-size:13px; color:#475569; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Panel Admin — Impulsabg</h1>
+      <div id="authSection">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <div><label>Email</label><input id="adminEmail" /></div>
+          <div><label>Contraseña</label><input id="adminPass" type="password" /></div>
+          <div style="margin-top:22px;">
+            <button class="btn" id="loginBtn">Entrar</button>
+            <button class="btn" id="createAdminBtn" style="background:#198754">Crear usuario admin</button>
+            <button class="btn" id="logoutBtn" style="display:none;background:#6c757d">Salir</button>
+          </div>
+        </div>
+        <div id="authMsg" class="muted"></div>
+      </div>
+
+      <div id="panel" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <button class="btn" id="refreshBtn">Actualizar</button>
+            <button class="btn" id="exportCsvBtn" title="Exportar CSV">Exportar CSV</button>
+            <button class="btn" id="exportXlsxBtn" title="Exportar Excel">Exportar Excel</button>
+            <button class="btn" id="exportPdfBtn" title="Exportar PDF">Exportar PDF</button>
+          </div>
+          <div>
+            <input id="search" placeholder="Buscar por nombre, email, ciudad..." />
+          </div>
+        </div>
+
+        <h3 style="margin-top:12px;">Postulaciones</h3>
+        <div id="applicantsWrap" class="card muted">Cargando...</div>
+
+        <h3 style="margin-top:12px;">Empresas</h3>
+        <div id="companiesWrap" class="card muted">Cargando...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- libs -->
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.24.0/firebase-storage-compat.js"></script>
+
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <!-- jsPDF for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDhv4JeQ8Rr_VR2lyDY3APdHuAB2ImE7rg",
+      authDomain: "impulsabga.firebaseapp.com",
+      projectId: "impulsabga",
+      storageBucket: "impulsabga.firebasestorage.app",
+      messagingSenderId: "761772480480",
+      appId: "1:761772480480:web:2a2a5f49ecae2395057d85"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const storage = firebase.storage();
+
+    const loginBtn = document.getElementById('loginBtn');
+    const createAdminBtn = document.getElementById('createAdminBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const authMsg = document.getElementById('authMsg');
+    const panel = document.getElementById('panel');
+
+    loginBtn.onclick = async ()=>{
+      const email = document.getElementById('adminEmail').value.trim();
+      const pass = document.getElementById('adminPass').value;
+      if(!email||!pass){ authMsg.textContent='Email y contraseña requeridos'; return; }
+      try{ await auth.signInWithEmailAndPassword(email, pass); authMsg.textContent='Autenticado'; }catch(err){ authMsg.textContent='Error: '+err.message; }
+    };
+
+    createAdminBtn.onclick = async ()=>{
+      const email = document.getElementById('adminEmail').value.trim();
+      const pass = document.getElementById('adminPass').value;
+      if(!email||!pass){ authMsg.textContent='Email y contraseña requeridos'; return; }
+      try{
+        // create via client: this will create user if your Authentication allows it.
+        await auth.createUserWithEmailAndPassword(email, pass);
+        authMsg.textContent='Usuario admin creado. Luego ingresa con ese usuario.';
+      }catch(err){ authMsg.textContent='Error: '+err.message; }
+    };
+
+    logoutBtn.onclick = ()=> auth.signOut();
+
+    auth.onAuthStateChanged(async user=>{
+      if(user){
+        document.getElementById('authSection').style.display='none';
+        panel.style.display='block';
+        logoutBtn.style.display='inline-block';
+        await loadAll();
+      }else{
+        document.getElementById('authSection').style.display='block';
+        panel.style.display='none';
+        logoutBtn.style.display='none';
+      }
+    });
+
+    async function loadAll(){
+      // applicants
+      const appSnap = await db.collection('applicants').orderBy('createdAt','desc').get();
+      const applicantsWrap = document.getElementById('applicantsWrap');
+      if(appSnap.empty){ applicantsWrap.innerHTML = '<div class="muted">Sin postulaciones</div>'; }
+      else{
+        let html = '<table><thead><tr><th>Nombre</th><th>Email</th><th>Ciudad</th><th>Habilidades</th><th>CV</th><th>Fecha</th></tr></thead><tbody>';
+        appSnap.forEach(doc=>{
+          const d = doc.data();
+          const date = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toLocaleString() : '';
+          const cvBtn = d.cvUrl ? `<a href="${d.cvUrl}" target="_blank" class="btn" style="background:#198754">Descargar</a>` : '<span class="muted">sin CV</span>';
+          html += `<tr>
+            <td>${escapeHtml(d.name||'')}</td>
+            <td>${escapeHtml(d.email||'')}</td>
+            <td>${escapeHtml(d.city||'')}</td>
+            <td>${escapeHtml(d.skills||'')}</td>
+            <td>${cvBtn}</td>
+            <td>${date}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        applicantsWrap.innerHTML = html;
+      }
+
+      // companies
+      const compSnap = await db.collection('companies').orderBy('createdAt','desc').get();
+      const companiesWrap = document.getElementById('companiesWrap');
+      if(compSnap.empty){ companiesWrap.innerHTML = '<div class="muted">Sin empresas publicadas</div>'; }
+      else{
+        let html = '<table><thead><tr><th>Empresa</th><th>Vacante</th><th>Ciudad</th><th>Cualidades</th></tr></thead><tbody>';
+        compSnap.forEach(doc=>{
+          const d = doc.data();
+          html += `<tr>
+            <td>${escapeHtml(d.name||'')}</td>
+            <td>${escapeHtml(d.jobTitle||'')}</td>
+            <td>${escapeHtml(d.city||'')}</td>
+            <td>${escapeHtml(d.qualities||'')}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        companiesWrap.innerHTML = html;
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadAll);
+
+    // EXPORT CSV
+    function exportCSV(rows){
+      if(!rows.length) return alert('No hay datos');
+      const headers = Object.keys(rows[0]);
+      const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h => `"${String(r[h]||'').replace(/"/g,'""')}"`).join(','))).join('\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'postulaciones.csv'; a.click(); URL.revokeObjectURL(url);
+    }
+
+    // EXPORT EXCEL (SheetJS)
+    async function exportXLSX(rows){
+      if(!rows.length) return alert('No hay datos');
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Postulaciones');
+      XLSX.writeFile(wb, 'postulaciones.xlsx');
+    }
+
+    // EXPORT PDF (simple table)
+    async function exportPDF(rows){
+      if(!rows.length) return alert('No hay datos');
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('l','pt','a4');
+      const headers = Object.keys(rows[0]);
+      const body = rows.map(r => headers.map(h => String(r[h]||'')));
+      // use autoTable if available (but keep simple)
+      if(doc.autoTable){
+        doc.autoTable({ head:[headers], body });
+        doc.save('postulaciones.pdf');
+        return;
+      }
+      // fallback: simple text export
+      let y = 40;
+      doc.setFontSize(12);
+      doc.text('Postulaciones', 40, y);
+      y += 20;
+      rows.forEach(r=>{
+        doc.text(JSON.stringify(r), 40, y);
+        y += 14;
+        if(y > 540){ doc.addPage(); y = 40; }
+      });
+      doc.save('postulaciones.pdf');
+    }
+
+    async function getApplicantsForExport(){
+      const snap = await db.collection('applicants').orderBy('createdAt','desc').get();
+      const rows = snap.docs.map(d=>{
+        const x = d.data();
+        return {
+          Nombre: x.name||'',
+          Email: x.email||'',
+          Telefono: x.phone||'',
+          Ciudad: x.city||'',
+          Educacion: x.education||'',
+          Habilidades: x.skills||'',
+          CV: x.cvUrl ? x.cvUrl : '',
+          Fecha: x.createdAt && x.createdAt.toDate ? x.createdAt.toDate().toLocaleString() : ''
+        };
+      });
+      return rows;
+    }
+
+    document.getElementById('exportCsvBtn').addEventListener('click', async ()=>{
+      const rows = await getApplicantsForExport();
+      exportCSV(rows);
+    });
+    document.getElementById('exportXlsxBtn').addEventListener('click', async ()=>{
+      const rows = await getApplicantsForExport();
+      exportXLSX(rows);
+    });
+    document.getElementById('exportPdfBtn').addEventListener('click', async ()=>{
+      const rows = await getApplicantsForExport();
+      exportPDF(rows);
+    });
+
+    document.getElementById('search').addEventListener('input', async ()=>{
+      const q = document.getElementById('search').value.toLowerCase();
+      await loadAll();
+      if(!q) return;
+      // simple client-side filter
+      const rows = document.querySelectorAll('#applicantsWrap tbody tr');
+      rows.forEach(r=>{
+        r.style.display = (r.textContent.toLowerCase().includes(q)) ? '' : 'none';
+      });
+    });
+
+    function escapeHtml(str){ return String(str||'').replace(/[&<>"'`=\/]/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'}[s])); }
+  </script>
+</body>
+</html>
